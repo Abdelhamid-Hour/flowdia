@@ -1,19 +1,26 @@
+// React state drives the controlled auth form fields and loading state.
 import React, { useState } from 'react'
+// Auth context exposes sign in/up methods backed by Supabase.
 import { useAuth } from '@/context/auth-context'
+// Reusable UI primitives for consistent styling.
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
+// Toast notifications provide immediate success/error feedback.
 import { toast } from 'sonner'
+// Decorative and provider icons used in the login card.
 import { Bot, Sparkles } from 'lucide-react'
 import { FcGoogle } from 'react-icons/fc'
 
 export default function Login() {
+  // Local controlled form values and submission lock.
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const { signIn, signUp, signInWithGoogle } = useAuth()
 
+  // Handles email/password login flow.
   const handleSignIn = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -22,6 +29,7 @@ export default function Login() {
     setLoading(false)
   }
 
+  // Handles registration flow from the same screen.
   const handleSignUp = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -34,6 +42,7 @@ export default function Login() {
     setLoading(false)
   }
 
+  // Handles OAuth login via Google provider.
   const handleGoogleSignIn = async () => {
     setLoading(true)
     const { error } = await signInWithGoogle()

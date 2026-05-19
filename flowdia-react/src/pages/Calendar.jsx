@@ -1,9 +1,7 @@
-// Migrated from Next.js app/calendar/page.tsx to Vite SPA
-
 import * as React from "react"
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect, useCallback } from "react"
 import { CalendarDays, CalendarRange, Clock, Lock, AlertTriangle, Edit2, Trash2, RefreshCw, Eye, GripVertical, Image as ImageIcon, ChevronLeft, ChevronRight } from "lucide-react"
-import { FaFacebook, FaInstagram, FaYoutube } from "react-icons/fa"
+import { FaFacebook } from "react-icons/fa"
 import { toast } from "sonner"
 import { DndContext, useDraggable, useDroppable, DragOverlay, closestCenter, useSensor, useSensors, PointerSensor } from "@dnd-kit/core"
 import { CSS } from "@dnd-kit/utilities"
@@ -19,8 +17,9 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/compone
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { ManualPostCreator } from "@/components/manual-post-creator"
+import { useAuth } from "@/context/auth-context"
+import { callApi } from "@/lib/api"
 
-// Helper for time math
 function timeToDecimal(timeStr) {
   const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i)
   if (!match) return 0
@@ -42,33 +41,110 @@ function decimalToTime(decimal) {
   return `${displayHour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')} ${ampm}`
 }
 
-// Initial mock state for cross-view dragging
-const initialPosts = [
-  { id: 'post-1', cellId: 'cell-16', time: "10:00 AM", platforms: ["FB", "IG"], caption: "Ever wonder how AI can save you 10 hours a week?", status: "scheduled", isLocked: true, type: 'queued', count: 3, title: 'Campaign Launch' },
-  { id: 'post-2', cellId: 'cell-18', time: "03:30 PM", platforms: ["IG"], caption: "Behind the scenes at the office! Building features you asked for. 💻✨", status: "scheduled", isLocked: false, type: 'scheduled', count: 2, title: 'Weekly Update' },
-  { id: 'post-3', cellId: 'weekly-1', time: "09:00 AM", platforms: ["YT"], caption: "New Video Drop! Full tutorial on mastering the calendar module.", status: "flagged", isLocked: false, type: 'queued', count: 1, title: 'Video Drop' },
-  { id: 'post-4', cellId: 'weekly-3', time: "02:00 PM", platforms: ["FB"], caption: "Weekly Q&A is live!", status: "scheduled", isLocked: false, type: 'queued', count: 1, title: 'Q&A' },
-  { id: 'post-5', cellId: 'daily-0', time: "11:00 AM", platforms: ["FB", "IG"], caption: "Daily standup highlights.", status: "scheduled", isLocked: true, type: 'queued', count: 1, title: 'Highlights' },
-]
+const getLocalDateStr = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
 
 export default function EditorialCalendar() {
+  const { session } = useAuth()
   const [view, setView] = useState("monthly")
   const [showRoadmap, setShowRoadmap] = useState(true)
   const [selectedDayContent, setSelectedDayContent] = useState(null)
   const [selectedPost, setSelectedPost] = useState(null)
   const [isManualModalOpen, setIsManualModalOpen] = useState(false)
   const [editingPost, setEditingPost] = useState(null)
-  
-  const [posts, setPosts] = useState(initialPosts)
+  const [posts, setPosts] = useState([])
   const [activeDragId, setActiveDragId] = useState(null)
+  const [currentDate, setCurrentDate] = useState(new Date())
+
+  const fetchPosts = useCallback(async () => {
+    if (!session?.access_token) return;
+    try {
+      // Fetch posts for the visible timeline
+      const data = await callApi('/posts', {}, session);
+      
+      const mappedPosts = data.posts.map(post => {
+        const d = new Date(post.scheduled_publish_time);
+        
+        return {
+          id: post.id,
+          cellId: `cell-${getLocalDateStr(d)}`, 
+          time: decimalToTime(d.getHours() + d.getMinutes() / 60),
+          platforms: ["FB"],
+          caption: post.caption,
+          status: post.status,
+          isLocked: post.status === 'pushed',
+          type: post.topic_id ? 'autonomous' : 'manual',
+          count: 1,
+          title: post.topics?.title || 'Manual Post',
+          rawDate: post.scheduled_publish_time,
+          image_url: post.image_url
+        }
+      });
+      setPosts(mappedPosts);
+    } catch (error) {
+      toast.error(error.message);
+    }
+  }, [session]);
+
+  React.useEffect(() => {
+    fetchPosts();
+  }, [fetchPosts]);
 
   const handleClearFlag = (postId) => {
     setPosts(prev => prev.map(p => p.id === postId ? { ...p, status: 'scheduled' } : p))
     setSelectedPost((prev) => prev?.id === postId ? { ...prev, status: 'scheduled' } : prev)
   }
-  
-  // Dynamic Date Navigation
-  const [currentDate, setCurrentDate] = useState(new Date()) // Use true current date
+
+  const handleDeletePost = async (id) => {
+    try {
+      await callApi(`/posts/${id}`, { method: 'DELETE' }, session)
+      setPosts(prev => prev.filter(p => p.id !== id))
+      setSelectedPost(null)
+      if (selectedDayContent) {
+         setSelectedDayContent(prev => ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }))
+      }
+      toast.success("Post deleted.")
+    } catch (error) {
+      toast.error(error.message)
+    }
+  }
+
+  const handleRegeneratePost = async (id) => {
+    try {
+      const data = await callApi(`/posts/${id}/regenerate`, { method: 'POST' }, session)
+      
+      const newRawDate = new Date(data.post.scheduled_publish_time);
+      const updatedPostObj = {
+        id: data.post.id,
+        cellId: `cell-${getLocalDateStr(newRawDate)}`, 
+        time: decimalToTime(newRawDate.getHours() + newRawDate.getMinutes() / 60),
+        platforms: ["FB"],
+        caption: data.post.caption,
+        status: data.post.status,
+        isLocked: data.post.status === 'pushed',
+        type: data.post.topic_id ? 'autonomous' : 'manual',
+        count: 1,
+        title: data.post.topics?.title || 'Manual Post',
+        rawDate: data.post.scheduled_publish_time
+      };
+
+      setPosts(prev => prev.map(p => p.id === id ? updatedPostObj : p));
+      setSelectedPost(updatedPostObj);
+      if (selectedDayContent) {
+         setSelectedDayContent(prev => ({ 
+           ...prev, 
+           posts: prev.posts.map(p => p.id === id ? updatedPostObj : p) 
+         }))
+      }
+      toast.success("Post successfully regenerated from topic brief.");
+    } catch (error) {
+      toast.error(error.message);
+    }
+  }
 
   const navigateDate = (direction) => {
     if (direction === 0) {
@@ -91,7 +167,7 @@ export default function EditorialCalendar() {
       return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(currentDate)
     } else if (view === 'weekly') {
       const start = new Date(currentDate)
-      start.setDate(currentDate.getDate() - currentDate.getDay() + 1) // Force Monday start for mock
+      start.setDate(currentDate.getDate() - currentDate.getDay() + 1)
       const end = new Date(start)
       end.setDate(start.getDate() + 6)
       const formatStr = (d) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(d)
@@ -113,65 +189,65 @@ export default function EditorialCalendar() {
     setActiveDragId(event.active.id)
   }
 
-  const handleDragEnd = (event) => {
+  const handleDragEnd = async (event) => {
     setActiveDragId(null)
     const { active, over } = event
     if (!over) return
 
     const targetId = String(over.id)
-    
-    // Check if dropping on a past cell in Monthly view
-    if (targetId.startsWith('cell-')) {
-      const cellIndex = parseInt(targetId.split('-')[1], 10)
-      if (cellIndex < 14) { // Mock past dates for first 2 weeks
-        toast.error("⚠️ Cannot schedule posts in the past.", {
-          description: "Please select a current or future date.",
-          duration: 3000,
-        })
-        return
-      }
+    const draggedPost = posts.find(p => p.id === active.id)
+    if (!draggedPost) return;
+
+    let newCellId = draggedPost.cellId;
+    let newTime = draggedPost.time;
+
+    if (targetId.startsWith('cell-') && !targetId.includes('-hour-')) {
+       newCellId = targetId; 
+    } else if (targetId.includes('-hour-')) {
+       const parts = targetId.split('-hour-');
+       newCellId = parts[0];
+       const hour = parseInt(parts[1], 10);
+       newTime = decimalToTime(hour);
     }
 
-    let hasChanges = false;
+    if (newCellId === draggedPost.cellId && newTime === draggedPost.time) return;
 
-    setPosts(prev => {
-      const nextPosts = prev.map(post => {
-        const isGroupDrag = String(active.id).startsWith('group-');
-        const sourceCellId = isGroupDrag ? String(active.id).replace('group-', '') : null;
+    try {
+      const dateStr = newCellId.replace('cell-', '');
+      const [hours, minutes] = newTime.split(':');
+      const isPM = newTime.includes('PM');
+      let h = parseInt(hours, 10);
+      if (isPM && h < 12) h += 12;
+      if (!isPM && h === 12) h = 0;
+      
+      const newDate = new Date(`${dateStr}T00:00:00`);
+      newDate.setHours(h);
+      newDate.setMinutes(parseInt(minutes, 10));
 
-        if (post.id === active.id || (isGroupDrag && post.cellId === sourceCellId)) {
-          let newCellId = post.cellId
-          let newTime = post.time
+      const payload = {
+         scheduled_publish_time: newDate.toISOString()
+      };
 
-          if (targetId.startsWith('cell-')) {
-            newCellId = targetId // Monthly cell
-          } else if (targetId.includes('-hour-')) {
-            // e.g. "weekly-2-hour-14"
-            const parts = targetId.split('-hour-')
-            newCellId = parts[0]
-            const hour = parseInt(parts[1], 10)
-            newTime = decimalToTime(hour)
-          }
+      await callApi(`/posts/${draggedPost.id}`, {
+         method: 'PATCH',
+         body: JSON.stringify(payload)
+      }, session);
 
-          if (newCellId !== post.cellId || newTime !== post.time) {
-            hasChanges = true;
-          }
-          
-          return { ...post, cellId: newCellId, time: newTime }
-        }
-        return post
-      });
+      setPosts(prev => prev.map(p => {
+         if (p.id === active.id) {
+            return { ...p, cellId: newCellId, time: newTime, rawDate: newDate.toISOString() }
+         }
+         return p;
+      }));
 
-      if (hasChanges) {
-        toast.success(String(active.id).startsWith('group-') ? "All posts rescheduled successfully." : "Post rescheduled successfully.")
-      }
-      return nextPosts;
-    })
+      toast.success("Post rescheduled successfully.")
+    } catch (error) {
+      toast.error(error.message);
+    }
   }
 
   return (
     <div className="flex h-full flex-col">
-      {/* Top Bar Controls */}
       <div className="sticky top-0 z-30 flex flex-col gap-4 border-b border-gray-200 bg-white/95 px-8 py-4 backdrop-blur supports-[backdrop-filter]:bg-white/60">
         <div className="flex items-center justify-between">
           <div>
@@ -211,22 +287,9 @@ export default function EditorialCalendar() {
               <span className="text-sm font-bold text-gray-900 min-w-[140px]">{currentDateLabel}</span>
             </div>
           </div>
-
-          <Select defaultValue="all">
-            <SelectTrigger className="w-[180px] bg-white border-gray-200">
-              <SelectValue placeholder="Platform Filter" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Platforms</SelectItem>
-              <SelectItem value="facebook">Facebook</SelectItem>
-              <SelectItem value="instagram">Instagram</SelectItem>
-              <SelectItem value="youtube">YouTube</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
       </div>
 
-      {/* Main Grid Area */}
       <div className="flex-1 overflow-auto p-8 bg-gray-50">
         <div className="mx-auto max-w-7xl bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden min-h-[600px] flex flex-col">
           <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} collisionDetection={closestCenter}>
@@ -253,7 +316,6 @@ export default function EditorialCalendar() {
         </div>
       </div>
 
-      {/* Slide-Over Drawer for Monthly Day Details */}
       <Sheet open={!!selectedDayContent} onOpenChange={(open) => !open && setSelectedDayContent(null)}>
         <SheetContent className="w-full sm:max-w-md overflow-y-auto">
           <SheetHeader className="mb-6 flex flex-row items-start justify-between">
@@ -262,7 +324,6 @@ export default function EditorialCalendar() {
               <SheetDescription>Scheduled posts and planned topics.</SheetDescription>
             </div>
             {(() => {
-              // Business Logic: Calculate if the selected sidebar date is in the past to lock post creation.
               const today = new Date(new Date().setHours(0,0,0,0));
               const selectedDate = selectedDayContent?.date ? new Date(selectedDayContent.date) : new Date();
               const isPastDay = selectedDate < today;
@@ -283,106 +344,44 @@ export default function EditorialCalendar() {
         </SheetContent>
       </Sheet>
 
-      {/* Post Preview Modal */}
       <PostPreviewModal 
         post={selectedPost} 
         onClose={() => setSelectedPost(null)} 
         onClearFlag={handleClearFlag} 
         onEdit={(postToEdit) => {
-          // Close the preview modal first to let Dialog clean up focus state smoothly
           setSelectedPost(null)
-          // Open the edit post creator modal in the next event cycle
           setTimeout(() => {
             setEditingPost(postToEdit)
           }, 200)
         }}
+        onDelete={() => handleDeletePost(selectedPost?.id)}
+        onRegenerate={handleRegeneratePost}
       />
 
-      {/* Manual Post Creator in Edit Mode */}
       <ManualPostCreator
         open={!!editingPost}
         onOpenChange={(open) => !open && setEditingPost(null)}
         editPost={editingPost}
-        onSuccess={(updatedData) => {
-          // Business Logic: Real-time update of master posts state when any post is edited
-          setPosts(prev => prev.map(p => {
-            if (p.id === updatedData.id) {
-              return {
-                ...p,
-                caption: updatedData.content,
-                content: updatedData.content,
-                mediaPrompt: updatedData.mediaPrompt,
-                audience: updatedData.audience
-              }
-            }
-            return p
-          }))
-
-          // Business Logic: Sync updates directly inside the active slide-over drawer
-          if (selectedDayContent) {
-            setSelectedDayContent(prev => ({
-              ...prev,
-              posts: prev.posts.map(p => {
-                if (p.id === updatedData.id) {
-                  return {
-                    ...p,
-                    caption: updatedData.content,
-                    content: updatedData.content,
-                    mediaPrompt: updatedData.mediaPrompt,
-                    audience: updatedData.audience
-                  }
-                }
-                return p
-              })
-            }))
-          }
+        onSuccess={() => {
+           fetchPosts();
+           setEditingPost(null);
+           setSelectedDayContent(null);
         }}
       />
 
-      {/* Manual Post Creator Modal */}
       <ManualPostCreator 
         open={isManualModalOpen} 
         onOpenChange={setIsManualModalOpen} 
-        fixedDate={selectedDayContent?.date ? new Date(selectedDayContent.date) : undefined}
-        onSuccess={(newPostData) => {
-          // Convert 24hr time input (e.g. "14:30") to 12hr format expected by the calendar ("02:30 PM")
-          const [hour, min] = newPostData.time.split(':')
-          const h = parseInt(hour, 10)
-          const formattedTime = `${(h % 12 || 12).toString().padStart(2, '0')}:${min} ${h >= 12 ? 'PM' : 'AM'}`
-
-          // Construct the visual post representation for the calendar grid
-          const newCalendarPost = {
-            id: `cal-manual-${Date.now()}`,
-            cellId: selectedDayContent?.cellId || 'daily-0', // Fallback
-            time: formattedTime,
-            platforms: newPostData.platforms,
-            caption: newPostData.content,
-            status: "scheduled", // Manual posts require review
-            isLocked: false,
-            type: "manual",
-            count: 1,
-            title: "Manual Post"
-          }
-
-          // 1. Inject into the master calendar view state
-          setPosts(prev => [...prev, newCalendarPost])
-
-          // 2. Inject into the active slide-over drawer immediately
-          if (selectedDayContent) {
-            setSelectedDayContent(prev => ({
-              ...prev,
-              posts: [...prev.posts, newCalendarPost]
-            }))
-          }
+        fixedDate={selectedDayContent?.cellId ? new Date(selectedDayContent.cellId.replace('cell-', '') + "T00:00:00") : undefined}
+        onSuccess={() => {
+           fetchPosts();
+           setIsManualModalOpen(false);
+           setSelectedDayContent(null);
         }}
       />
     </div>
   )
 }
-
-// ----------------------------------------------------------------------
-// Drag & Drop Wrappers
-// ----------------------------------------------------------------------
 
 function DroppableCell({ id, className, children, onClick }) {
   const { isOver, setNodeRef } = useDroppable({ id })
@@ -405,14 +404,13 @@ function DraggablePill({ post }) {
     return <div className="h-8 w-full rounded-lg bg-gray-100 border border-dashed border-gray-300 opacity-50"></div>
   }
 
-  // Determine color scheme based on post status priority
-  const statusStyles = post.status === 'flagged'
+  const statusStyles = post.status === 'failed'
     ? 'bg-red-50 text-red-700 border-red-200'
     : post.status === 'scheduled'
       ? 'bg-orange-50 text-orange-700 border-orange-200'
       : 'bg-white text-gray-700 border-gray-200'
 
-  const countBg = post.status === 'flagged'
+  const countBg = post.status === 'failed'
     ? 'bg-red-100 text-red-800'
     : post.status === 'scheduled'
       ? 'bg-orange-100 text-orange-800'
@@ -424,13 +422,10 @@ function DraggablePill({ post }) {
       style={style}
       className={`rounded-lg text-xs font-semibold flex items-center border shadow-sm hover:shadow-md transition-shadow ${statusStyles}`}
     >
-      {/* Count badge on the left */}
       <span className={`shrink-0 px-2 py-1.5 rounded-l-lg font-bold ${countBg}`}>
         {post.count || 1}
       </span>
-      {/* Label text in the center */}
       <span className="truncate flex-1 px-2 py-1.5">{post.title || post.caption}</span>
-      {/* Drag handle on the right — only this triggers dragging */}
       <div
         className="shrink-0 px-1.5 py-1.5 cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 transition-colors rounded-r-lg hover:bg-gray-100"
         {...listeners}
@@ -458,11 +453,6 @@ function DraggablePostCard({ post, onClick }) {
   )
 }
 
-
-// ----------------------------------------------------------------------
-// Grid Components
-// ----------------------------------------------------------------------
-
 function MonthlyGrid({ posts, showRoadmap, onDayClick, currentDate }) {
   const daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
@@ -483,28 +473,29 @@ function MonthlyGrid({ posts, showRoadmap, onDayClick, currentDate }) {
     let isCurrentMonthCell = false
     let isPast = false
     let isToday = false
+    let cellDate;
     
     if (i < firstDay) {
       dayNum = daysInPrevMonth - firstDay + i + 1
       isPast = true
+      cellDate = new Date(year, month - 1, dayNum)
     } else if (i >= firstDay && i < firstDay + daysInMonth) {
       dayNum = i - firstDay + 1
       isCurrentMonthCell = true
-      
-      const cellDate = new Date(year, month, dayNum)
+      cellDate = new Date(year, month, dayNum)
       const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate())
-      
       if (cellDate < todayDate) isPast = true
       if (cellDate.getTime() === todayDate.getTime()) isToday = true
     } else {
       dayNum = i - (firstDay + daysInMonth) + 1
       isPast = false
+      cellDate = new Date(year, month + 1, dayNum)
     }
 
-    const id = `cell-${i}`
+    const id = `cell-${getLocalDateStr(cellDate)}`
     const cellPosts = posts.filter(p => p.cellId === id)
-    const hasGhost = i > 18 && i % 3 === 0
-    const cellDateStr = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(year, month, isCurrentMonthCell ? dayNum : 1))
+    const hasGhost = false 
+    const cellDateStr = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(cellDate)
 
     return { 
       id, 
@@ -539,17 +530,14 @@ function MonthlyGrid({ posts, showRoadmap, onDayClick, currentDate }) {
               <span className={`text-sm font-medium ${cell.isToday ? 'bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center' : !cell.isCurrentMonthCell ? 'text-gray-400 opacity-50' : cell.isPast ? 'text-gray-400' : 'text-gray-900'}`}>
                 {cell.dayNum}
               </span>
-              {cell.isPast && <div className="text-[10px] text-gray-400 font-medium">PAST</div>}
             </div>
 
             <div className="flex-1 space-y-1.5 z-10 pointer-events-auto">
               {cell.posts.length > 0 && (() => {
-                // Business Logic: Aggregate all posts for the day into a single group pill for the Monthly View.
-                // Count is simply the number of posts in this cell, not platforms.
                 const postCount = cell.posts.length;
-                const hasFlagged = cell.posts.some(p => p.status === "flagged");
+                const hasFailed = cell.posts.some(p => p.status === "failed");
                 const hasScheduled = cell.posts.some(p => p.status === "scheduled");
-                const status = hasFlagged ? "flagged" : hasScheduled ? "scheduled" : "scheduled";
+                const status = hasFailed ? "failed" : hasScheduled ? "scheduled" : "scheduled";
                 const title = postCount === 1
                   ? (cell.posts[0].title || cell.posts[0].caption || "Scheduled Post")
                   : "Posts Scheduled";
@@ -565,13 +553,6 @@ function MonthlyGrid({ posts, showRoadmap, onDayClick, currentDate }) {
                   />
                 );
               })()}
-
-              {showRoadmap && cell.hasGhost && !cell.isPast && cell.isCurrentMonthCell && (
-                <div className="px-2 py-1.5 rounded-md text-xs font-medium border border-dashed border-gray-300 bg-gray-50 text-gray-500 flex items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-blue-300 shrink-0"></div>
-                  <span className="truncate">Planned Topic</span>
-                </div>
-              )}
             </div>
           </DroppableCell>
         ))}
@@ -588,14 +569,13 @@ function WeeklyGrid({ posts, currentDate, onPostClick }) {
     const d = new Date(start)
     d.setDate(start.getDate() + i)
     const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(d)
-    return { name: dayName, num: d.getDate(), id: `weekly-${i}` }
+    return { name: dayName, num: d.getDate(), id: `cell-${getLocalDateStr(d)}` }
   })
   
   const hours = Array.from({ length: 24 }).map((_, i) => i)
 
   return (
     <div className="flex h-[1440px] flex-1 overflow-y-auto">
-      {/* Y-Axis: Time */}
       <div className="w-20 border-r border-gray-200 flex flex-col bg-gray-50/50 shrink-0 sticky left-0 z-30 pt-14">
         {hours.map(hour => (
           <div key={hour} className="h-[60px] border-b border-gray-200 text-xs font-medium text-gray-500 p-2 text-right relative">
@@ -605,7 +585,6 @@ function WeeklyGrid({ posts, currentDate, onPostClick }) {
       </div>
 
       <div className="flex-1 flex flex-col min-w-[800px]">
-        {/* X-Axis: Days Header */}
         <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50/50 sticky top-0 z-20 shrink-0 h-14">
           {days.map(day => (
             <div key={day.id} className="py-2 text-center border-r last:border-r-0 border-gray-200 bg-gray-50/95 backdrop-blur flex flex-col items-center justify-center">
@@ -615,21 +594,17 @@ function WeeklyGrid({ posts, currentDate, onPostClick }) {
           ))}
         </div>
         
-        {/* Main Grid Area */}
         <div className="flex-1 grid grid-cols-7 bg-gray-200 gap-px relative h-[1440px]">
-          {/* Horizontal Grid Lines */}
           <div className="absolute inset-0 pointer-events-none z-0" style={{ backgroundImage: 'linear-gradient(to bottom, #e5e7eb 1px, transparent 1px)', backgroundSize: '100% 60px' }}></div>
           
           {days.map(day => {
             const dayPosts = posts.filter(p => p.cellId === day.id)
             return (
               <div key={day.id} className="bg-white relative flex flex-col">
-                {/* 24 Droppable Hourly Slots */}
                 {hours.map(hour => (
                   <DroppableCell key={hour} id={`${day.id}-hour-${hour}`} className="h-[60px] w-full z-0" />
                 ))}
                 
-                {/* Absolutely Positioned Posts */}
                 {dayPosts.map(post => (
                   <DraggablePostCard key={post.id} post={post} onClick={() => onPostClick(post)} />
                 ))}
@@ -644,7 +619,7 @@ function WeeklyGrid({ posts, currentDate, onPostClick }) {
 
 function DailyGrid({ posts, currentDate, onPostClick }) {
   const hours = Array.from({ length: 24 }).map((_, i) => i)
-  const dayId = 'daily-0'
+  const dayId = `cell-${getLocalDateStr(currentDate)}`
   const dayPosts = posts.filter(p => p.cellId === dayId)
 
   return (
@@ -657,15 +632,12 @@ function DailyGrid({ posts, currentDate, onPostClick }) {
         ))}
       </div>
       <div className="flex-1 relative bg-white flex flex-col mt-4">
-        {/* Grid Lines */}
         <div className="absolute inset-0 pointer-events-none z-0" style={{ backgroundImage: 'linear-gradient(to bottom, #f3f4f6 1px, transparent 1px)', backgroundSize: '100% 60px' }}></div>
         
-        {/* 24 Droppable Hourly Slots */}
         {hours.map(hour => (
           <DroppableCell key={hour} id={`${dayId}-hour-${hour}`} className="h-[60px] w-full z-0" />
         ))}
 
-        {/* Absolutely Positioned Posts */}
         {dayPosts.map(post => (
           <DraggablePostCard key={post.id} post={post} onClick={() => onPostClick(post)} />
         ))}
@@ -674,15 +646,11 @@ function DailyGrid({ posts, currentDate, onPostClick }) {
   )
 }
 
-// ----------------------------------------------------------------------
-// Post Card & Modal
-// ----------------------------------------------------------------------
-
 function PostCard({ post, onClick }) {
   const statusColors = {
-    "scheduled": "border-l-emerald-500 bg-white",
     "scheduled": "border-l-orange-500 bg-orange-50/30",
-    "flagged": "border-l-red-500 bg-red-50/50"
+    "pushed": "border-l-emerald-500 bg-white",
+    "failed": "border-l-red-500 bg-red-50/50"
   }
   
   return (
@@ -704,9 +672,7 @@ function PostCard({ post, onClick }) {
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-bold text-gray-900">{post.time}</span>
             <div className="flex items-center gap-1.5">
-              {post.platforms?.includes('FB') && <FaFacebook className="h-3.5 w-3.5 text-[#1877F2]" />}
-              {post.platforms?.includes('IG') && <FaInstagram className="h-3.5 w-3.5 text-[#E4405F]" />}
-              {post.platforms?.includes('YT') && <FaYoutube className="h-3.5 w-3.5 text-[#FF0000]" />}
+              <FaFacebook className="h-3.5 w-3.5 text-[#1877F2]" />
             </div>
           </div>
           <p className="text-xs sm:text-sm text-gray-600 line-clamp-2 font-medium">{post.caption || post.title}</p>
@@ -716,8 +682,19 @@ function PostCard({ post, onClick }) {
   )
 }
 
-function PostPreviewModal({ post, onClose, onClearFlag, onEdit }) {
+function PostPreviewModal({ post, onClose, onClearFlag, onEdit, onDelete, onRegenerate }) {
+  const [isRegenerating, setIsRegenerating] = useState(false);
+
   if (!post) return null
+
+  const handleRegenerate = async () => {
+    setIsRegenerating(true);
+    try {
+      await onRegenerate(post.id);
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
 
   return (
     <Dialog open={!!post} onOpenChange={(open) => !open && onClose()}>
@@ -725,19 +702,17 @@ function PostPreviewModal({ post, onClose, onClearFlag, onEdit }) {
         <DialogTitle className="sr-only">Post Preview</DialogTitle>
         <DialogDescription className="sr-only">Details and actions for the selected post.</DialogDescription>
         
-        {/* Flagged Banner - Fixed Padding and Radius */}
-        {post.status === "Flagged" && (
-          <div className="bg-amber-50 border-b border-amber-200 p-4 pr-12 flex items-center justify-between w-full rounded-t-xl">
-            <div className="flex items-center gap-2 text-amber-800">
+        {post.status === "failed" && (
+          <div className="bg-red-50 border-b border-red-200 p-4 pr-12 flex items-center justify-between w-full rounded-t-xl">
+            <div className="flex items-center gap-2 text-red-800">
               <AlertTriangle className="h-5 w-5 shrink-0" />
-              <p className="text-sm font-bold">⚠️ Topic was updated. Does this post still make sense?</p>
+              <p className="text-sm font-bold">⚠️ This post failed to publish.</p>
             </div>
-            <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white shadow-sm shrink-0 ml-4" onClick={() => onClearFlag(post.id)}>Keep & Clear Flag</Button>
+            <Button size="sm" className="bg-red-600 hover:bg-red-700 text-white shadow-sm shrink-0 ml-4" onClick={() => onEdit(post)}>Fix & Reschedule</Button>
           </div>
         )}
 
         <div className="grid md:grid-cols-2">
-          {/* Visual Side */}
           <div className="bg-gray-100 border-r border-gray-200 p-6 flex flex-col items-center justify-center min-h-[300px] relative">
             <div className="w-full aspect-square bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col items-center justify-center text-gray-400">
                <ImageIcon className="h-12 w-12 mb-2" />
@@ -750,17 +725,12 @@ function PostPreviewModal({ post, onClose, onClearFlag, onEdit }) {
             )}
           </div>
 
-          {/* Content Side */}
           <div className="p-6 pr-12 flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                {post.platforms?.map((p) => (
-                  <div key={p} className="flex items-center justify-center p-1.5 border border-gray-200 rounded-md bg-white shadow-sm">
-                    {p === 'FB' && <FaFacebook className="h-4 w-4 text-[#1877F2]" />}
-                    {p === 'IG' && <FaInstagram className="h-4 w-4 text-[#E4405F]" />}
-                    {p === 'YT' && <FaYoutube className="h-4 w-4 text-[#FF0000]" />}
-                  </div>
-                ))}
+                <div className="flex items-center justify-center p-1.5 border border-gray-200 rounded-md bg-white shadow-sm">
+                  <FaFacebook className="h-4 w-4 text-[#1877F2]" />
+                </div>
               </div>
               <span className="text-sm font-bold text-gray-900">{post.time}</span>
             </div>
@@ -777,20 +747,20 @@ function PostPreviewModal({ post, onClose, onClearFlag, onEdit }) {
                 variant="outline" 
                 className="border-gray-200 bg-white hover:bg-gray-50 text-gray-700"
                 onClick={() => onEdit(post)}
+                disabled={post.isLocked || isRegenerating}
               >
                 <Edit2 className="mr-2 h-4 w-4" /> Edit
               </Button>
               
-              <Button variant="outline" className="border-gray-200 bg-white hover:bg-gray-50 text-gray-700">
+              <Button variant="outline" className="border-gray-200 bg-white hover:bg-gray-50 text-gray-700" disabled={!post.isLocked || isRegenerating}>
                 <Eye className="mr-2 h-4 w-4" /> View Live
               </Button>
 
-              {/* Already Scheduled Intercept */}
               {post.isLocked ? (
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <Button variant="outline" className="col-span-2 border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100">
-                      <RefreshCw className="mr-2 h-4 w-4" /> Regenerate Entire Post
+                    <Button variant="outline" className="col-span-2 border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100" disabled={isRegenerating}>
+                      <RefreshCw className={`mr-2 h-4 w-4 ${isRegenerating ? 'animate-spin' : ''}`} /> Regenerate Entire Post
                     </Button>
                   </AlertDialogTrigger>
                   <AlertDialogContent>
@@ -802,19 +772,19 @@ function PostPreviewModal({ post, onClose, onClearFlag, onEdit }) {
                     </AlertDialogHeader>
                     <AlertDialogFooter className="mt-4">
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction className="bg-orange-600 hover:bg-orange-700 text-white">
+                      <AlertDialogAction className="bg-orange-600 hover:bg-orange-700 text-white" onClick={handleRegenerate}>
                         Proceed & Regenerate
                       </AlertDialogAction>
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
               ) : (
-                <Button variant="outline" className="col-span-2 border-gray-200 bg-white hover:bg-gray-50 text-gray-700">
-                  <RefreshCw className="mr-2 h-4 w-4" /> Regenerate Entire Post
+                <Button variant="outline" className="col-span-2 border-gray-200 bg-white hover:bg-gray-50 text-gray-700" disabled={isRegenerating} onClick={handleRegenerate}>
+                  <RefreshCw className={`mr-2 h-4 w-4 ${isRegenerating ? 'animate-spin' : ''}`} /> {isRegenerating ? 'Regenerating...' : 'Regenerate Entire Post'}
                 </Button>
               )}
               
-              <Button variant="ghost" className="col-span-2 text-red-600 hover:text-red-700 hover:bg-red-50 mt-2">
+              <Button variant="ghost" className="col-span-2 text-red-600 hover:text-red-700 hover:bg-red-50 mt-2" onClick={onDelete} disabled={post.isLocked || isRegenerating}>
                 <Trash2 className="mr-2 h-4 w-4" /> Cancel & Delete
               </Button>
             </div>

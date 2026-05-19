@@ -23,12 +23,12 @@ import { addDays, addWeeks, addMonths } from "date-fns"
  */
 
 /**
- * @typedef {'daily' | 'weekly' | 'biweekly' | 'monthly'} TopicCycle
+ * @typedef {'daily' | 'weekly' | 'monthly'} TopicCycle
  * Defines how frequently the AI generates new topic batches.
  */
 
 /**
- * @typedef {'scheduled' | 'flagged' | 'published' | 'scheduled' | 'failed'} PostStatus
+ * @typedef {'pending' | 'scheduled' | 'pushed' | 'failed' | 'deleted'} PostStatus
  * Represents the current state of a social media post.
  */
 
@@ -47,6 +47,7 @@ import { addDays, addWeeks, addMonths } from "date-fns"
  * @property {string} topicId - Foreign key linking to the parent topic.
  * @property {string} caption - The generated post caption text.
  * @property {PostStatus} status - Current state of the post.
+ * @property {string} platform - The platform identifier (always 'FB').
  */
 
 // Helper to format dates dynamically for the mock dataset
@@ -62,7 +63,7 @@ export const mockTopics = [
   // 1. The Passed Topic: Archived, 5 days ago
   { id: "top_1", title: "The Evolution of RAG Architectures", brief: "How Retrieval-Augmented Generation is replacing standard fine-tuning for enterprise models.", target_date: getRelativeDateStr(-5), status: "archived" },
   
-  // 2. The Overdue Topic: Needs Review, 2 days ago
+  // 2. The Overdue Topic: Scheduled, 2 days ago
   { id: "top_2", title: "Optimizing Vite for Monorepos", brief: "Deep dive into Rolldown and how Vite 6 handles massive React codebases.", target_date: getRelativeDateStr(-2), status: "scheduled" },
   
   // 3. The Active Topic: In Use, Today
@@ -71,16 +72,16 @@ export const mockTopics = [
   // 4. The Upcoming Topic: scheduled for 3 days in the future
   { id: "top_4", title: "Server Actions in Next.js 15", brief: "Exploring how React Server Components are changing full-stack form mutations.", target_date: getRelativeDateStr(3), status: "scheduled" },
   
-  // 5. The Upcoming Needs Review Topic: Needs Review, 5 days in the future
+  // 5. The Upcoming Topic: Scheduled, 5 days in the future
   { id: "top_5", title: "The Future of WebAssembly & Rust", brief: "Why Rust is becoming the dominant language for high-performance frontend tooling.", target_date: getRelativeDateStr(5), status: "scheduled" }
 ]
 
 /** @type {Post[]} */
 export const mockPosts = [
-  { id: "post_1", topicId: "top_3", caption: "Step-by-step breakdown of the ENIAD admission process.", status: "scheduled" },
-  { id: "post_2", topicId: "top_3", caption: "Everything you need to know about ENIAD.", status: "scheduled" },
-  { id: "post_3", topicId: "top_3", caption: "ENIAD admissions guide published!", status: "published" },
-  { id: "post_4", topicId: "top_4", caption: "How to balance coding bootcamps.", status: "scheduled" },
+  { id: "post_1", topicId: "top_3", caption: "Step-by-step breakdown of the ENIAD admission process.", status: "scheduled", platform: "FB" },
+  { id: "post_2", topicId: "top_3", caption: "Everything you need to know about ENIAD.", status: "scheduled", platform: "FB" },
+  { id: "post_3", topicId: "top_3", caption: "ENIAD admissions guide published!", status: "pushed", platform: "FB" },
+  { id: "post_4", topicId: "top_4", caption: "How to balance coding bootcamps.", status: "scheduled", platform: "FB" },
 ]
 
 // --- Context ---
@@ -98,7 +99,12 @@ export function MockDbProvider({ children }) {
   // Local state representing the "database" tables
   const [topics, setTopics] = useState(mockTopics)
   const [posts, setPosts] = useState(mockPosts)
-  const [topicCycle, setTopicCycle] = useState("weekly")
+  const [topic_cycle, setTopicCycle] = useState("weekly")
+  
+  // New flat columns for automation settings
+  const [frequency_per_day, setFrequencyPerDay] = useState(2)
+  const [active_days, setActiveDays] = useState(["Mon", "Tue", "Wed", "Thu", "Fri"])
+  const [global_times, setGlobalTimes] = useState(["09:00", "15:00"])
 
   /**
    * Swaps the target dates of two topics to simulate reordering in the timeline.
@@ -181,7 +187,7 @@ export function MockDbProvider({ children }) {
     ])
   }
 
-  // Note: approval workflow removed — bulk-approve function intentionally omitted.
+  // --- Methods ---
 
   /**
    * Generates and appends new topics to the content roadmap.
@@ -202,10 +208,9 @@ export function MockDbProvider({ children }) {
         let nextDate
 
         // Calculate the next date slot using date-fns helpers based on the current automation cycle.
-        switch (topicCycle) {
+        switch (topic_cycle) {
           case 'daily': nextDate = addDays(lastDate, 1); break
           case 'weekly': nextDate = addWeeks(lastDate, 1); break
-          case 'biweekly': nextDate = addWeeks(lastDate, 2); break
           case 'monthly': nextDate = addMonths(lastDate, 1); break
           default: nextDate = addWeeks(lastDate, 1)
         }
@@ -248,10 +253,9 @@ export function MockDbProvider({ children }) {
 
       let nextDate
       // Calculate the next available date based on the user's topic_cycle setting
-      switch (topicCycle) {
+      switch (topic_cycle) {
         case 'daily': nextDate = addDays(lastDate, 1); break
         case 'weekly': nextDate = addWeeks(lastDate, 1); break
-        case 'biweekly': nextDate = addWeeks(lastDate, 2); break
         case 'monthly': nextDate = addMonths(lastDate, 1); break
         default: nextDate = addWeeks(lastDate, 1)
       }
@@ -272,31 +276,30 @@ export function MockDbProvider({ children }) {
   }
 
   /**
-   * Schedules manual posts for the specified platforms.
+   * Schedules manual posts for the Facebook platform.
    * @param {Object} postData - The manual post data.
-   * @param {string[]} postData.platforms - Selected platform identifiers (e.g., ['FB', 'IG']).
    * @param {string} postData.audience - The target audience.
    * @param {string} postData.content - The main text content of the post.
    * @param {string} postData.mediaPrompt - The image prompt.
    * @param {Date} postData.scheduledDate - The exact date and time the post is scheduled for.
    */
   const scheduleManualPost = (postData) => {
-    const { platforms, audience, content, mediaPrompt, scheduledDate } = postData;
+    const { audience, content, mediaPrompt, scheduledDate } = postData;
     
-    // Business Logic: Map over each platform selected by the user to generate a dedicated post entity.
-    const newPosts = platforms.map((platform, index) => ({
-      id: `post_manual_${Date.now()}_${index}_${platform.toLowerCase()}`,
-      platform: platform,
+    // Business Logic: Generate a dedicated Facebook post entity.
+    const newPost = {
+      id: `post_manual_${Date.now()}_fb`,
+      platform: "FB",
       type: "manual",
       status: "scheduled",
       content: content,
       media: null, // Would contain the generated media URL in production
       scheduled_for: scheduledDate.toISOString(),
       performance: null
-    }))
+    }
 
-    // Append the newly generated posts to the global state
-    setPosts(prev => [...prev, ...newPosts])
+    // Append the newly generated post to the global state
+    setPosts(prev => [...prev, newPost])
   }
 
   /**
@@ -325,8 +328,14 @@ export function MockDbProvider({ children }) {
       setTopics,
       posts,
       setPosts,
-      topicCycle,
+      topic_cycle,
       setTopicCycle,
+      frequency_per_day,
+      setFrequencyPerDay,
+      active_days,
+      setActiveDays,
+      global_times,
+      setGlobalTimes,
       reorderTopicDates,
       setTopicInUse,
       versionTopic,
