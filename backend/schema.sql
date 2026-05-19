@@ -49,6 +49,7 @@ CREATE TABLE public.profiles (
 CREATE TABLE public.social_accounts (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
+  platform text NOT NULL,
   account_id text NOT NULL,
   account_name text,
   avatar_url text,
@@ -58,7 +59,8 @@ CREATE TABLE public.social_accounts (
   status text DEFAULT 'connected'::text CHECK (status = ANY (ARRAY['connected'::text, 'disconnected'::text])),
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT social_accounts_pkey PRIMARY KEY (id),
-  CONSTRAINT social_accounts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+  CONSTRAINT social_accounts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT social_accounts_user_platform_unique UNIQUE (user_id, platform)
 );
 CREATE TABLE public.topics (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
