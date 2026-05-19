@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
 const facebook = require('../services/facebook');
+const notifications = require('../services/notifications');
 
 /**
  * GET /api/history
@@ -84,6 +85,9 @@ router.post('/:id/reschedule', async (req, res, next) => {
       console.error(`[History API] Reschedule failed for post ${id}:`, fbError);
       finalStatus = 'failed';
       errorLog = fbError.message;
+
+      // Trigger notification for the user
+      await notifications.notifyFacebookError(userId, fbError.message);
     }
 
     // 3. Update database

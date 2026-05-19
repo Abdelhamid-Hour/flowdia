@@ -62,6 +62,18 @@ CREATE TABLE public.social_accounts (
   CONSTRAINT social_accounts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
   CONSTRAINT social_accounts_user_platform_unique UNIQUE (user_id, platform)
 );
+CREATE TABLE public.notifications (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  title text NOT NULL,
+  message text,
+  type text DEFAULT 'info'::text CHECK (type = ANY (ARRAY['info'::text, 'warning'::text, 'error'::text, 'success'::text])),
+  is_read boolean DEFAULT false,
+  action_url text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT notifications_pkey PRIMARY KEY (id),
+  CONSTRAINT notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
 CREATE TABLE public.topics (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
@@ -70,6 +82,7 @@ CREATE TABLE public.topics (
   target_date date NOT NULL,
   status text DEFAULT '''scheduled''::text'::text,
   created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT topics_pkey PRIMARY KEY (id),
   CONSTRAINT topics_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
 );

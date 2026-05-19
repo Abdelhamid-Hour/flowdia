@@ -35,18 +35,33 @@ class AutomationService {
     try {
       const userId = settings.user_id;
 
+      // Ensure we only run if the master switch is ON, 
+      // unless this is a forced manual trigger (forcedCount != null).
+      if (!settings.is_active && forcedCount === null) {
+        console.log(`[AutomationService] Automation is PAUSED for user ${userId}. Skipping.`);
+        return { topicsGenerated: 0, postsGenerated: 0, promotedTopic: null };
+      }
+
+      const result = {
+        topicsGenerated: 0,
+        postsGenerated: 0,
+        promotedTopic: null
+      };
+
       // A. Topic Maintenance: Ensure the roadmap is full
-      await this.ensureTopicRoadmap(settings, forcedCount);
+      result.topicsGenerated = await this.ensureTopicRoadmap(settings, forcedCount);
 
       // B. Promotion: Promote today's topic to 'in_use' if needed
-      await this.promoteTodayTopic(userId);
+      result.promotedTopic = await this.promoteTodayTopic(userId);
 
       // C. Post Generation: Generate posts for 'in_use' topics for TODAY
-      await this.generatePostsForToday(settings);
+      result.postsGenerated = await this.generatePostsForToday(settings);
 
+      return result;
     } catch (error) {
       console.error(`[AutomationService] Error for user ${settings.user_id}:`, error);
       if (forcedCount !== null) throw error; // Re-throw for manual API triggers
+      return null;
     }
   }
 
@@ -55,6 +70,7 @@ class AutomationService {
    */
   async ensureTopicRoadmap(settings, forcedCount = null) {
     const { user_id, topic_cycle, active_days } = settings;
+    let topicsGeneratedCount = 0;
     
     // Find the latest scheduled topic
     const { data: latestTopicArr } = await supabase
@@ -182,8 +198,10 @@ class AutomationService {
 
       if (inserts.length > 0) {
         await supabase.from("topics").insert(inserts);
+        topicsGeneratedCount = inserts.length;
       }
     }
+    return topicsGeneratedCount;
   }
 
   isDayActive(date, activeDays) {
@@ -208,7 +226,7 @@ class AutomationService {
     const currentActive = currentActiveArray && currentActiveArray.length > 0 ? currentActiveArray[0] : null;
 
     // If it's already today's topic, we are done
-    if (currentActive && currentActive.target_date === todayStr) return;
+    if (currentActive && currentActive.target_date === todayStr) return null;
 
     // Find if there is a scheduled topic for today
     const { data: todayTopicArray } = await supabase
@@ -228,6 +246,7 @@ class AutomationService {
       // Promote new
       await supabase.from("topics").update({ status: "in_use" }).eq("id", todayTopic.id);
       console.log(`[AutomationService] Promoted topic ${todayTopic.id} to in_use for user ${userId}`);
+      return todayTopic;
     } else {
       // If no topic for today but we have an old in_use, should we keep it?
       // For weekly/monthly, we keep it until the next scheduled one arrives
@@ -244,6 +263,7 @@ class AutomationService {
            await supabase.from("topics").update({ status: "archived" }).eq("id", currentActive.id);
         }
       }
+      return null;
     }
   }
 
@@ -256,7 +276,7 @@ class AutomationService {
     const today = new Date();
     
     // Check if today is an active day
-    if (active_days && !this.isDayActive(today, active_days)) return;
+    if (active_days && !this.isDayActive(today, active_days)) return 0;
 
     const todayStr = today.toISOString().split("T")[0];
 
@@ -269,7 +289,7 @@ class AutomationService {
 
     const activeTopic = activeTopics && activeTopics.length > 0 ? activeTopics[0] : null;
 
-    if (!activeTopic) return;
+    if (!activeTopic) return 0;
 
     // Check if posts already exist for today
     const { data: existingPosts } = await supabase
@@ -279,9 +299,12 @@ class AutomationService {
       .gte("scheduled_publish_time", `${todayStr}T00:00:00`)
       .lte("scheduled_publish_time", `${todayStr}T23:59:59`);
 
-    if (existingPosts && existingPosts.length > 0) return;
+    if (existingPosts && existingPosts.length > 0) {
+      console.log(`[AutomationService] Posts already exist for today (${todayStr}) for user ${user_id}. Skipping generation.`);
+      return 0;
+    }
 
-    console.log(`[AutomationService] Generating ${frequency_per_day} posts for today (${todayStr}) using topic ${activeTopic.id}`);
+    console.log(`[AutomationService] No posts found for today (${todayStr}) for user ${user_id}. Proceeding to generate ${frequency_per_day} posts using topic: "${activeTopic.title}".`);
 
     const postsToCreate = [];
     for (let i = 0; i < frequency_per_day; i++) {
@@ -333,6 +356,7 @@ class AutomationService {
     if (postsToCreate.length > 0) {
       await supabase.from("posts").insert(postsToCreate);
     }
+    return postsToCreate.length;
   }
 }
 

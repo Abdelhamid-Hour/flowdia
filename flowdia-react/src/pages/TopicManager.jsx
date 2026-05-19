@@ -465,7 +465,11 @@ export default function TopicManager() {
 function SortableTopicCard({ topic, onUpdate, onDelete, onUseNow }) {
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const config = statusConfig[topic.status]
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: topic.id })
+  const isArchived = topic.status === 'archived'
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ 
+    id: topic.id,
+    disabled: isArchived
+  })
   const style = { transform: CSS.Transform.toString(transform), transition }
   
   const isOverdue = useMemo(() => {
@@ -480,8 +484,12 @@ function SortableTopicCard({ topic, onUpdate, onDelete, onUseNow }) {
     <>
       <Card ref={setNodeRef} style={style} className={cn("group relative cursor-pointer hover:border-blue-300", isDragging && "z-50 opacity-90 ring-2 ring-blue-500 shadow-lg", isOverdue && "border-amber-300 bg-amber-50/30")} onClick={() => setIsEditorOpen(true)}>
         <CardContent className="p-4 flex items-start gap-3">
-          <div className="flex items-center pt-1 cursor-grab text-gray-400" {...attributes} {...listeners} onClick={e => e.stopPropagation()}>
-            <GripVertical className="h-5 w-5" />
+          <div 
+            className={cn("flex items-center pt-1 cursor-grab text-gray-400", isArchived && "cursor-default text-gray-300")} 
+            {...(isArchived ? {} : { ...attributes, ...listeners })}
+            onClick={e => e.stopPropagation()}
+          >
+            {isArchived ? <Lock className="h-4 w-4" /> : <GripVertical className="h-5 w-5" />}
           </div>
           <div className="flex-1 space-y-1">
             <div className="flex items-center gap-2 mb-1">
@@ -514,6 +522,7 @@ function TopicEditorModal({ isOpen, onClose, topic, onUpdate, isCreating = false
   const [title, setTitle] = useState(topic.title)
   const [brief, setBrief] = useState(topic.brief)
   const [targetDate, setTargetDate] = useState(topic.target_date)
+  const isArchived = topic.status === 'archived'
 
   useEffect(() => {
     setTitle(topic.title)
@@ -525,26 +534,56 @@ function TopicEditorModal({ isOpen, onClose, topic, onUpdate, isCreating = false
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>{isCreating ? "Create New Topic" : "Edit Topic"}</DialogTitle>
-          <DialogDescription>{isCreating ? "Manually add a topic to your roadmap." : "Modify topic details and schedule."}</DialogDescription>
+          <div className="flex items-center gap-2">
+            <DialogTitle>{isCreating ? "Create New Topic" : isArchived ? "Archived Topic" : "Edit Topic"}</DialogTitle>
+            {isArchived && <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-200">Read Only</Badge>}
+          </div>
+          <DialogDescription>
+            {isCreating 
+              ? "Manually add a topic to your roadmap." 
+              : isArchived 
+                ? "This topic is archived and cannot be modified." 
+                : "Modify topic details and schedule."}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4">
           <div className="space-y-2">
             <Label>Target Date</Label>
-            <Input type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} />
+            <Input 
+              type="date" 
+              value={targetDate} 
+              onChange={e => setTargetDate(e.target.value)} 
+              disabled={isArchived}
+            />
           </div>
           <div className="space-y-2">
             <Label>Title</Label>
-            <Input value={title} onChange={e => setTitle(e.target.value)} />
+            <Input 
+              value={title} 
+              onChange={e => setTitle(e.target.value)} 
+              disabled={isArchived}
+            />
           </div>
           <div className="space-y-2">
             <Label>Brief / Instructions</Label>
-            <Textarea value={brief} onChange={e => setBrief(e.target.value)} className="min-h-[150px]" />
+            <Textarea 
+              value={brief} 
+              onChange={e => setBrief(e.target.value)} 
+              className="min-h-[150px]" 
+              disabled={isArchived}
+            />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => { onUpdate({ ...topic, title, brief, target_date: targetDate }); onClose(); }} className="bg-blue-600 hover:bg-blue-700">Save Changes</Button>
+          <Button variant="outline" onClick={onClose}>{isArchived ? "Close" : "Cancel"}</Button>
+          {!isArchived && (
+            <Button 
+              onClick={() => { onUpdate({ ...topic, title, brief, target_date: targetDate }); onClose(); }} 
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isCreating ? "Create Topic" : "Save Changes"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

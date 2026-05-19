@@ -326,7 +326,7 @@ router.delete('/integrations/:id', async (req, res, next) => {
 
     const { data, error } = await supabase
       .from('social_accounts')
-      .update({ status: 'disconnected' })
+      .delete()
       .eq('id', integrationId)
       .eq('user_id', userId)
       .select('id')
@@ -342,7 +342,7 @@ router.delete('/integrations/:id', async (req, res, next) => {
 
     return res.json({
       success: true,
-      message: 'Integration disconnected.',
+      message: 'Integration removed successfully.',
     });
   } catch (error) {
     next(error);

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
 const automation = require('../services/automation');
+const notifications = require('../services/notifications');
 
 const TOPIC_CYCLES = new Set(['daily', 'weekly', 'monthly']);
 const IMAGE_SOURCES = new Set(['ai', 'stock', 'auto']);
@@ -174,6 +175,14 @@ router.patch('/settings', async (req, res, next) => {
       .single();
 
     if (updateError) throw updateError;
+
+    // Trigger immediate run if active to ensure first day isn't skipped
+    if (updated.is_active) {
+      automation.handleUserAutomation(updated).catch(err => {
+        console.error('[Automation Route] Failed to trigger immediate run:', err);
+      });
+    }
+
     return res.json({
       success: true,
       message: 'Automation settings updated.',
@@ -230,7 +239,12 @@ router.post('/run', async (req, res, next) => {
     const { count } = req.body || {};
     
     // Trigger the automation process for this user immediately
-    await automation.handleUserAutomation(settings, count);
+    const result = await automation.handleUserAutomation(settings, count);
+
+    // Notify user if posts were generated
+    if (result && result.postsGenerated > 0) {
+      await notifications.notifyPostsGenerated(userId, result.postsGenerated);
+    }
 
     return res.status(200).json({
       success: true,

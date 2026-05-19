@@ -13,6 +13,7 @@ const automationRouter = require('./routes/automation');
 const profileRouter = require('./routes/profile');
 const historyRouter = require('./routes/history');
 const topicsRouter = require('./routes/topics');
+const notificationsRouter = require('./routes/notifications');
 const aiRouter = require('./routes/ai'); // New: Added AI router
 const postsRouter = require('./routes/posts'); // New: Added Posts router
 const facebookAuthRouter = require('./routes/auth/facebook'); // New: Added FB Auth router
@@ -54,6 +55,7 @@ app.use('/api/ai', authenticate(false), aiRouter); // New: AI utility routes
 // app.use('/api/billing', authenticate(true), billingRouter);
 app.use('/api/profile', authenticate(false), profileRouter); 
 app.use('/api/history', authenticate(false), historyRouter); 
+app.use('/api/notifications', authenticate(false), notificationsRouter);
 app.use('/api/auth/facebook', authenticate(false), facebookAuthRouter); // New: Facebook Auth
 
 // --- 3. GLOBAL ERROR HANDLER ---

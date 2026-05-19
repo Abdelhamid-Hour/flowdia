@@ -91,9 +91,29 @@ router.patch('/:id', async (req, res, next) => {
     const { id } = req.params;
     const { title, brief, target_date, status } = req.body;
 
+    // 1. Fetch current status
+    const { data: existing, error: fetchError } = await supabase
+      .from('topics')
+      .select('status')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+
+    if (fetchError || !existing) {
+      return res.status(404).json({ error: 'Topic not found.' });
+    }
+
+    if (existing.status === 'archived') {
+      return res.status(400).json({ 
+        error: 'ValidationError', 
+        message: 'Archived topics cannot be edited. Please create a new version instead.' 
+      });
+    }
+
+    // 2. Perform update
     const { data, error } = await supabase
       .from('topics')
-      .update({ title, brief, target_date, status, updated_at: new Date().toISOString() })
+      .update({ title, brief, target_date, status })
       .eq('id', id)
       .eq('user_id', userId)
       .select()
@@ -148,7 +168,7 @@ router.post('/:id/promote', async (req, res, next) => {
     // 2. Promote this one
     const { data, error } = await supabase
       .from('topics')
-      .update({ status: 'in_use', updated_at: new Date().toISOString() })
+      .update({ status: 'in_use' })
       .eq('id', id)
       .eq('user_id', userId)
       .select()
@@ -164,7 +184,9 @@ router.post('/:id/promote', async (req, res, next) => {
       .single();
 
     if (settings) {
-      await automation.generatePostsForToday(settings);
+      automation.handleUserAutomation(settings).catch(err => {
+        console.error('[Topics Route] Failed to trigger immediate run:', err);
+      });
     }
 
     return res.json({ success: true, topic: data });

@@ -13,9 +13,9 @@ router.get('/url', (req, res, next) => {
     const redirectUri = encodeURIComponent(`${process.env.CLIENT_URL || 'http://localhost:5173'}/auth/facebook/callback`);
     
     // Scopes required for page management and publishing
-    // Note: pages_manage_posts and pages_read_engagement require App Review.
-    // We use pages_show_list and business_management as base scopes.
-    const scopes = 'pages_show_list,business_management,public_profile';
+    // Note: pages_manage_posts and pages_read_engagement require App Review for live apps,
+    // but can be used in Development Mode by App Admins/Developers/Testers.
+    const scopes = 'pages_show_list,business_management,public_profile,pages_read_engagement,pages_manage_posts';
     
     // We pass the userId in the state so we know who to attach the token to later
     const state = req.user.sub;

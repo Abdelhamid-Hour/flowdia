@@ -175,8 +175,28 @@ export default function AutomationSettings() {
               <span className={`text-sm font-semibold ${settings.is_active ? "text-gray-500" : "text-gray-900"}`}>Paused</span>
               <Switch
                 checked={settings.is_active}
-                disabled={isLoading}
-                onCheckedChange={(checked) => setSettings((prev) => ({ ...prev, is_active: checked }))}
+                disabled={isLoading || isSaving}
+                onCheckedChange={async (checked) => {
+                  // Update local state immediately for snappy UI
+                  setSettings((prev) => ({ ...prev, is_active: checked }));
+                  
+                  // Persist immediately to backend
+                  try {
+                    setIsSaving(true);
+                    const data = await callApi("/automation/settings", {
+                      method: "PATCH",
+                      body: JSON.stringify({ is_active: checked }),
+                    });
+                    setSettings(normalizeSettings(data.settings));
+                    toast.success(checked ? "Automation activated!" : "Automation paused.");
+                  } catch (error) {
+                    // Revert local state on failure
+                    setSettings((prev) => ({ ...prev, is_active: !checked }));
+                    toast.error("Failed to update status: " + error.message);
+                  } finally {
+                    setIsSaving(false);
+                  }
+                }}
                 className="data-[state=checked]:bg-emerald-500"
               />
               <span className={`text-sm font-semibold ${settings.is_active ? "text-emerald-600" : "text-gray-500"}`}>Active</span>
