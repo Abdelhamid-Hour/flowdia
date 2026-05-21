@@ -17,32 +17,25 @@ const notificationsRouter = require('./routes/notifications');
 const aiRouter = require('./routes/ai'); // New: Added AI router
 const postsRouter = require('./routes/posts'); // New: Added Posts router
 const facebookAuthRouter = require('./routes/auth/facebook'); // New: Added FB Auth router
+const proxyRouter = require('./routes/proxy'); // New: Added Proxy router
 const initScheduler = require('./services/scheduler');
 
 const app = express();
 
 // --- 1. SECURITY & UTILITY MIDDLEWARE ---
-app.use(helmet()); // Protects against well-known web vulnerabilities (XSS, clickjacking)
+app.use(helmet({
+  crossOriginResourcePolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
 const corsOptions = {
   origin: process.env.CLIENT_URL || 'http://localhost:5173', // Restrict to your React app
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 app.use(cors(corsOptions));
-app.options(/.*/, cors(corsOptions)); // Explicitly handle all preflight requests
+app.options(/.*/, cors(corsOptions)); 
 app.use(express.json());
 app.use(morgan('dev')); // Log every request to the console for debugging
-
-// --- 2. ROUTES ---
-
-// Public Health Check
-app.get('/api/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime() 
-  });
-});
 
 // Semi-Secure: Analytics (Allows AAL1 - standard login)
 app.use('/api/analytics', authenticate(false), analyticsRouter);
@@ -57,16 +50,20 @@ app.use('/api/profile', authenticate(false), profileRouter);
 app.use('/api/history', authenticate(false), historyRouter); 
 app.use('/api/notifications', authenticate(false), notificationsRouter);
 app.use('/api/auth/facebook', authenticate(false), facebookAuthRouter); // New: Facebook Auth
+app.use('/api/proxy', proxyRouter); // New: Proxy for images (unauthenticated for img tags)
 
 // --- 3. GLOBAL ERROR HANDLER ---
 // Professional servers never let a crash reveal the stack trace to the user
 app.use((err, req, res, next) => {
-  console.error(`[Error] ${err.stack}`);
+  const errorStack = err.stack || 'No stack trace available';
+  const errorMessage = err.message || (typeof err === 'string' ? err : 'Internal Server Error');
+  
+  console.error(`[Error] ${errorMessage}\n${errorStack}`);
   
   const statusCode = err.statusCode || 500;
   res.status(statusCode).json({
     error: true,
-    message: err.message || 'Internal Server Error',
+    message: errorMessage,
   });
 });
 

@@ -10,7 +10,7 @@ class GeminiService {
    * Generates a list of topics based on user settings.
    */
   async generateTopics(settings, count = 5, history = []) {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
       You are an expert social media strategist. 
@@ -53,7 +53,7 @@ class GeminiService {
    * Generates post content (caption and image prompt) for a specific topic.
    */
   async generatePostContent(topic, settings) {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
       You are a creative copywriter.
@@ -95,7 +95,7 @@ class GeminiService {
    * Enhances or rewrites a given text based on the requested mode.
    */
   async enhanceText(text, mode, settings) {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     let modeInstruction = "";
     switch (mode) {

@@ -27,7 +27,7 @@ export default function FacebookCallback() {
         return;
       }
 
-      try {
+      try { 
         await callApi('/auth/facebook/callback', {
           method: 'POST',
           body: JSON.stringify({ code, state })

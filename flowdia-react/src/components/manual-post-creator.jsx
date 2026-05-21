@@ -18,16 +18,20 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Sparkles, Image as ImageIcon, Wand2, CalendarClock, Send, RefreshCw, Type, Scissors, AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/context/auth-context"
 import { callApi } from "@/lib/api"
 import { format } from "date-fns"
+import { cn } from "@/lib/utils"
 
 export function ManualPostCreator({ open, onOpenChange, initialDate, fixedDate, onSuccess, editPost = null }) {
   const { session } = useAuth()
 
   const [isEnhancing, setIsEnhancing] = useState(false)
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false)
+  const [isImageLoading, setIsImageLoading] = useState(false)
   
   // Local state for text input fields
   const [postContent, setPostContent] = useState("")
@@ -46,11 +50,18 @@ export function ManualPostCreator({ open, onOpenChange, initialDate, fixedDate, 
   useEffect(() => {
     if (open && editPost) {
       setPostContent(editPost.content || editPost.caption || "")
-      setMediaPrompt(editPost.mediaPrompt || editPost.image_url || "")
+      const img = editPost.mediaPrompt || editPost.image_url || ""
+      setMediaPrompt(img)
+      if (img && img.startsWith('http')) {
+        setIsImageLoading(true)
+      } else {
+        setIsImageLoading(false)
+      }
     } else if (open && !editPost) {
       // Clear fields if we are creating a new post
       setPostContent("")
       setMediaPrompt("")
+      setIsImageLoading(false)
     }
   }, [open, editPost])
 
@@ -84,11 +95,15 @@ export function ManualPostCreator({ open, onOpenChange, initialDate, fixedDate, 
     // 1. If the user typed a specific prompt in the media box, generate an image from that directly.
     if (mediaPrompt.trim() && !mediaPrompt.startsWith('http')) {
        setIsEnhancing(true);
+       setIsGeneratingImage(true);
+       setIsImageLoading(true);
        toast.info("Generating AI Image...");
        // Simulate a tiny delay so the UI feels responsive
        setTimeout(() => {
-         setMediaPrompt(`https://image.pollinations.ai/prompt/${encodeURIComponent(mediaPrompt.trim())}?width=1080&height=1080&nologo=true`);
+         const seed = Math.floor(Math.random() * 1000000);
+         setMediaPrompt(`https://image.pollinations.ai/prompt/${encodeURIComponent(mediaPrompt.trim())}?width=1080&height=1080&nologo=true&seed=${seed}`);
          setIsEnhancing(false);
+         setIsGeneratingImage(false);
          toast.success("Image generated from your prompt.");
        }, 500);
        return;
@@ -102,6 +117,8 @@ export function ManualPostCreator({ open, onOpenChange, initialDate, fixedDate, 
     
     try {
       setIsEnhancing(true);
+      setIsGeneratingImage(true);
+      setIsImageLoading(true);
       toast.info("Analyzing content to generate image...");
       const data = await callApi('/ai/enhance', {
         method: 'POST',
@@ -112,8 +129,10 @@ export function ManualPostCreator({ open, onOpenChange, initialDate, fixedDate, 
       toast.success("Image generated successfully.");
     } catch (error) {
       toast.error(error.message);
+      setIsImageLoading(false);
     } finally {
       setIsEnhancing(false);
+      setIsGeneratingImage(false);
     }
   };
 
@@ -253,12 +272,42 @@ export function ManualPostCreator({ open, onOpenChange, initialDate, fixedDate, 
                 
                 {/* AI Generation Card */}
                 <div className="flex flex-col gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                  {mediaPrompt && mediaPrompt.startsWith('http') ? (
-                    <div className="relative w-full aspect-video rounded-md overflow-hidden border border-slate-200 bg-gray-100">
-                      <img src={mediaPrompt} alt="Generated" className="w-full h-full object-cover" />
-                      <Button variant="destructive" size="icon" className="absolute top-2 right-2 h-6 w-6 opacity-80 hover:opacity-100" onClick={() => setMediaPrompt("")}>
-                        <RefreshCw className="h-3 w-3" />
-                      </Button>
+                  {(mediaPrompt && mediaPrompt.startsWith('http')) || isGeneratingImage ? (
+                    <div className="relative w-full aspect-square rounded-md overflow-hidden border border-slate-200 bg-gray-100">
+                      {(isGeneratingImage || isImageLoading) && (
+                        <Skeleton className="absolute inset-0 h-full w-full rounded-none" />
+                      )}
+                      {mediaPrompt && mediaPrompt.startsWith('http') && (
+                        <img 
+                          key={mediaPrompt}
+                          src={mediaPrompt.startsWith('https://image.pollinations.ai') 
+                            ? `${import.meta.env.VITE_API_URL || "http://localhost:5000/api"}/proxy/image?url=${encodeURIComponent(mediaPrompt)}` 
+                            : mediaPrompt} 
+                          alt="Generated" 
+                          className={cn(
+                            "w-full h-full object-cover transition-opacity duration-300", 
+                            isImageLoading ? "opacity-0" : "opacity-100"
+                          )} 
+                          onLoad={() => {
+                            console.log("Image loaded successfully:", mediaPrompt);
+                            setIsImageLoading(false);
+                          }}
+                          onError={() => {
+                            console.error("Image failed to load:", mediaPrompt);
+                            setIsImageLoading(false);
+                          }}
+                        />
+                      )}
+                      {mediaPrompt && mediaPrompt.startsWith('http') && !isImageLoading && !isGeneratingImage && (
+                        <Button 
+                          variant="destructive" 
+                          size="icon" 
+                          className="absolute top-2 right-2 h-6 w-6 opacity-80 hover:opacity-100" 
+                          onClick={() => { setMediaPrompt(""); setIsImageLoading(false); }}
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
                   ) : (
                     <Textarea 
@@ -271,7 +320,7 @@ export function ManualPostCreator({ open, onOpenChange, initialDate, fixedDate, 
                     />
                   )}
                   <div className="flex flex-row justify-end gap-2 mt-1">
-                    {!mediaPrompt?.startsWith('http') && (
+                    {!mediaPrompt?.startsWith('http') && !isGeneratingImage && (
                       <Button variant="outline" size="sm" className="gap-2 border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 hover:text-indigo-800" disabled={isFormLocked || isEnhancing} onClick={handleGenerateImagePrompt}>
                         <Sparkles className={`h-4 w-4 ${isEnhancing ? 'animate-spin' : ''}`} /> Generate AI Image
                       </Button>

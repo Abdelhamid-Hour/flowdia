@@ -29,7 +29,8 @@ router.post('/enhance', async (req, res, next) => {
     let result = await ai.enhanceText(text, mode, settings || {});
     
     if (mode === 'image') {
-      result = `https://image.pollinations.ai/prompt/${encodeURIComponent(result)}?width=1080&height=1080&nologo=true`;
+      const seed = Math.floor(Math.random() * 1000000);
+      result = `https://image.pollinations.ai/prompt/${encodeURIComponent(result)}?width=1080&height=1080&nologo=true&seed=${seed}`;
     }
 
     return res.json({ success: true, result });

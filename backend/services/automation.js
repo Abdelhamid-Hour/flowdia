@@ -9,7 +9,7 @@ class AutomationService {
   /**
    * Main entry point for the background worker.
    */
-  async processAllAutomations() {
+  async processAllAutomations() { 
     try {
       // 1. Get all active users
       const { data: activeSettings, error } = await supabase
@@ -20,7 +20,7 @@ class AutomationService {
       if (error) throw error;
       if (!activeSettings) return;
 
-      for (const settings of activeSettings) {
+      for (const settings of activeSettings) { 
         await this.handleUserAutomation(settings);
       }
     } catch (error) {
